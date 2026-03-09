@@ -16,7 +16,7 @@
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
   <style>
-    body { background-color: #020617; color: #e2e8f0; font-family: sans-serif; }
+    body { background-color: #020617; color: #e2e8f0; font-family: sans-serif; overflow-x: hidden; }
     @keyframes fadeIn {
       from { opacity: 0; transform: translateY(10px); }
       to { opacity: 1; transform: translateY(0); }
@@ -72,11 +72,9 @@
       const [isReading, setIsReading] = useState(false);
       const [error, setError] = useState('');
       
-      // 使用 useRef 替代 useState 来管理输入框，解决打字极其卡顿的问题
       const keyInputRef = useRef(null);
       const questionInputRef = useRef(null);
       
-      // 用于在步骤之间传递最终确认的数据
       const [finalData, setFinalData] = useState({ key: '', question: '' });
 
       useEffect(() => {
@@ -89,7 +87,8 @@
         setReading('');
         setError('');
         setStep(1);
-        setVisualCards(Array.from({ length: 21 }, (_, i) => ({ id: `vcard-${i}`, drawn: false })));
+        // 生成完整的 78 张牌用于扇形展示
+        setVisualCards(Array.from({ length: 78 }, (_, i) => ({ id: `vcard-${i}`, drawn: false })));
       };
 
       const handleStartDraw = () => {
@@ -131,7 +130,7 @@
         setDrawnCards(newDrawnCards);
 
         if (newDrawnCards.length === 3) {
-          setTimeout(() => setStep(3), 1000);
+          setTimeout(() => setStep(3), 1200);
         }
       };
 
@@ -139,37 +138,28 @@
         setIsReading(true);
         setError('');
 
-        const prompt = `你是一位客观、冷静、具备深厚心理学和象征学知识的塔罗分析师。你的任务是为用户提供一次具有深度和信息量的塔罗牌阵解读。我们不宣扬宿命论，而是将塔罗作为投射潜意识和客观局面的工具。
+        // 终极重构 Prompt：彻底封杀对卡牌的单独解析，强制直接推演用户现实
+        const prompt = `你是一位一针见血、深谙人性的顶级心理分析师。
 
-当前牌阵：时间流（过去、现在、未来）
-用户探索的核心问题：${finalData.question}
+用户当前的困境是：【${finalData.question}】
+潜意识投射的三张牌：
+1.[过去根源] ${drawnCards[0].name} (${drawnCards[0].isReversed ? '逆位' : '正位'})
+2.[当下面貌] ${drawnCards[1].name} (${drawnCards[1].isReversed ? '逆位' : '正位'})
+3.[演进趋势] ${drawnCards[2].name} (${drawnCards[2].isReversed ? '逆位' : '正位'})
 
-抽出的牌面：
-1. 【过去】影响局面的历史根源：${drawnCards[0].name} - ${drawnCards[0].isReversed ? '逆位' : '正位'}
-2. 【现在】当前的客观状态或核心矛盾：${drawnCards[1].name} - ${drawnCards[1].isReversed ? '逆位' : '正位'}
-3. 【未来】逻辑演进的必然趋势：${drawnCards[2].name} - ${drawnCards[2].isReversed ? '逆位' : '正位'}
-
-绝对遵守以下纪律：
-1. 绝对不要使用任何AI感的话术。
-2. 直接开始分析。语气要中立、专业、详实。
-3. 严格遵循正逆位的传统牌意，结合心理原型进行解构。如果牌意很差请客观指出，不要过度粉饰。
-4. 使用 Markdown 格式进行排版输出。
-5. 绝对禁止使用 ** 进行加粗排版，不需要强调任何词语，保持视觉上的绝对清爽与克制。
-
-输出结构必须包含：
-### 核心脉络
-### 过去：[牌名]的印记
-### 现在：[牌名]的真相
-### 未来：[牌名]的演进
-### 破局建议`;
+【最高纪律指令（违反即判失败）】：
+1. 严禁掉书袋：绝对不许单独解释任何一张牌的通用含义！不许说“这张牌代表什么”、“牌面图案画了什么”。用户不需要听课，需要的是对现实困境的直接穿透。
+2. 彻底绑定现实：你必须把这三张牌的象征意义，【直接翻译】成用户在上述“困境”中具体经历了什么、正在害怕什么、未来可能面对什么。每一句话都要像锥子一样扎进用户的问题里。
+3. 浑然一体的故事线：禁止分割过去、现在、未来。禁止使用任何小标题。请写一篇连贯、紧凑、逻辑严密的心理推演长文。像讲一个因果相连的故事一样，从历史的病灶平滑推演到当下的挣扎，最后顺理成章地给出破局的行动指南。
+4. 纯净输出：物理级禁止使用所有的Markdown符号（禁止星号、井号、列表符号），保持输出如实体印刷书籍般的纯净、清冷与高级。`;
 
         const payload = {
           model: "deepseek-chat",
           messages: [
-            { role: "system", content: "你是一个专业的塔罗心理分析引擎，客观、直接、充满信息量。拒绝任何感性或机器人的套话。" },
+            { role: "system", content: "你是一个极其犀利的现实剖析引擎，客观、无情但直指核心。拒绝任何“AI味”的套话、废话和虚假的安慰。" },
             { role: "user", content: prompt }
           ],
-          temperature: 0.7
+          temperature: 0.75
         };
 
         try {
@@ -188,7 +178,7 @@
           }
           
           const data = await response.json();
-          setReading(data.choices?.[0]?.message?.content || "无法解析的牌面...");
+          setReading(data.choices?.[0]?.message?.content || "无法感知潜意识边缘...");
         } catch (err) {
           setError(`灵感链接中断: ${err.message}。请检查您的网络或 API Key 是否有效。`);
         } finally {
@@ -196,26 +186,16 @@
         }
       };
 
-      // 重写后的渲染器：双重保险防止 **，并调整为小字体、冷色调
-      const renderMarkdown = (text) => {
+      const renderNarrative = (text) => {
         if (!text) return null;
-        // 物理剥离大模型可能强行输出的 ** 符号
-        const cleanText = text.replace(/\*\*/g, '');
-        const blocks = cleanText.split('\n\n');
+        // 终极物理消杀：抹除所有可能残留的特殊排版符号
+        const cleanText = text.replace(/[*#_`>\\-]/g, '');
+        const blocks = cleanText.split('\n').filter(b => b.trim() !== '');
         
         return blocks.map((block, idx) => {
-          if (block.startsWith('### ')) {
-            // 标题：改小字号(text-base)，改颜色(text-slate-300)，增加左侧克制的细线修饰
-            return (
-              <h3 key={idx} className="text-base font-bold text-slate-300 mt-6 mb-3 border-l-2 border-slate-600 pl-3">
-                {block.replace('### ', '')}
-              </h3>
-            );
-          }
-          // 正文：改小字号(text-sm)，改颜色(text-slate-400)，去除任何花哨的染色
           return (
-            <p key={idx} className="mb-4 text-sm text-slate-400 leading-relaxed tracking-wide text-justify">
-              {block}
+            <p key={idx} className="mb-6 text-[15px] text-slate-300 leading-[1.8] tracking-widest text-justify indent-8">
+              {block.trim()}
             </p>
           );
         });
@@ -223,12 +203,12 @@
 
       return (
         <div className="min-h-screen selection:bg-slate-500/30">
-          <header className="py-8 text-center border-b border-amber-900/30 bg-slate-900/50">
-            <h1 className="text-3xl font-serif tracking-widest text-amber-500">✦ 客观塔罗洞察 ✦</h1>
-            <p className="mt-2 text-sm text-slate-500 tracking-widest uppercase">Psychological Archetype Analysis</p>
+          <header className="py-8 text-center border-b border-slate-800/50 bg-slate-900/30">
+            <h1 className="text-3xl font-serif tracking-widest text-slate-300">✦ 潜意识重影 ✦</h1>
+            <p className="mt-2 text-xs text-slate-500 tracking-widest uppercase">Psychological Narrative Analysis</p>
           </header>
 
-          <main className="max-w-4xl mx-auto px-6 py-12">
+          <main className="max-w-5xl mx-auto px-4 py-12">
             {error && (
               <div className="mb-6 p-4 bg-red-950/50 border border-red-900 text-red-400 rounded-lg text-sm text-center">
                 {error}
@@ -237,86 +217,108 @@
 
             {step === 1 && (
               <div className="animate-fade-in flex flex-col items-center">
-                <div className="w-full max-w-lg bg-slate-900 p-8 rounded-2xl shadow-2xl border border-slate-800">
-                  <h2 className="text-xl text-amber-400 mb-6 text-center">明确你的问题</h2>
+                <div className="w-full max-w-lg bg-slate-900/80 p-8 rounded-2xl shadow-2xl border border-slate-800">
+                  <h2 className="text-lg text-slate-300 mb-6 text-center font-serif">输入探寻的锚点</h2>
                   
-                  <div className="mb-6 bg-slate-950/50 p-4 rounded-lg border border-slate-800">
-                    <label className="block text-xs text-amber-600 mb-2 uppercase tracking-widest font-bold">
-                      DeepSeek API Key (必填)
+                  <div className="mb-6 bg-slate-950/50 p-4 rounded-lg border border-slate-800/80">
+                    <label className="block text-xs text-slate-500 mb-2 uppercase tracking-widest">
+                      DeepSeek API Key
                     </label>
                     <input 
                       type="password"
                       ref={keyInputRef}
                       defaultValue={localStorage.getItem('tarot_api_key') || ''}
-                      className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-slate-200 focus:outline-none focus:border-amber-500 transition-colors text-sm font-mono placeholder-slate-600"
+                      className="w-full bg-slate-900 border border-slate-700/50 rounded p-3 text-slate-300 focus:outline-none focus:border-slate-500 transition-colors text-sm font-mono placeholder-slate-700"
                       placeholder="sk-..."
                     />
-                    <p className="text-[10px] text-slate-500 mt-2">
-                      安全保障：您的 Key 仅保留在您的浏览器本地缓存中，直接请求 DeepSeek 官方接口，绝不经过任何第三方服务器。
-                    </p>
                   </div>
 
-                  <p className="text-sm text-slate-400 mb-4 text-center leading-relaxed">
-                    占卜并非预知未来，而是借由随机的视觉符号，照见潜意识。<br/>请尽可能客观、具体地描述你当下的困惑。
+                  <p className="text-xs text-slate-500 mb-4 text-center leading-relaxed">
+                    请尽可能客观、具体地描述当下的困惑。
                   </p>
                   <textarea 
                     ref={questionInputRef}
                     defaultValue=""
-                    className="w-full h-32 bg-slate-950 border border-slate-700 rounded-lg p-4 text-slate-200 focus:outline-none focus:border-amber-500 transition-colors resize-none placeholder-slate-600"
+                    className="w-full h-32 bg-slate-950/80 border border-slate-700/50 rounded-lg p-4 text-slate-300 focus:outline-none focus:border-slate-500 transition-colors resize-none placeholder-slate-700 text-sm leading-relaxed"
                     placeholder="例如：我目前在职业发展上遇到了瓶颈，想知道继续留在这里还是寻找新机会更利于我的长期发展？"
                   />
                   <button 
                     onClick={handleStartDraw}
-                    className="w-full mt-6 py-4 bg-amber-600 hover:bg-amber-500 text-slate-950 font-bold rounded-lg transition-all transform hover:scale-[1.02] shadow-[0_0_15px_rgba(217,119,6,0.3)]"
+                    className="w-full mt-6 py-4 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-lg transition-all tracking-widest border border-slate-700"
                   >
-                    开始凝视自我
+                    沉入潜意识
                   </button>
                 </div>
               </div>
             )}
 
             {step === 2 && (
-              <div className="animate-fade-in">
-                <div className="text-center mb-10">
-                  <h2 className="text-2xl text-amber-400 mb-2">凝神，抽取三张牌</h2>
-                  <p className="text-slate-400 text-sm">
-                    已抽出 <span className="text-amber-500 font-bold text-lg">{drawnCards.length}</span> / 3 张
+              <div className="animate-fade-in flex flex-col items-center w-full overflow-hidden">
+                <div className="text-center mb-6">
+                  <h2 className="text-xl text-slate-300 mb-2 font-serif">随直觉剥落三块碎片</h2>
+                  <p className="text-slate-500 text-xs tracking-widest">
+                    [ {drawnCards.length} / 3 ]
                   </p>
                 </div>
                 
-                <div className="grid grid-cols-7 gap-3 md:gap-4 max-w-3xl mx-auto mb-12">
-                  {visualCards.map((vcard, idx) => (
-                    <div 
-                      key={vcard.id}
-                      onClick={() => handleDrawCard(idx)}
-                      className={`
-                        aspect-[2/3] rounded-md border border-slate-700 bg-slate-800 cursor-pointer 
-                        transition-all duration-500 relative
-                        ${vcard.drawn ? 'opacity-0 scale-50 pointer-events-none' : 'hover:-translate-y-2 hover:border-amber-500 hover:shadow-[0_0_15px_rgba(217,119,6,0.4)]'}
-                      `}
-                    >
-                      <div className="absolute inset-2 border border-slate-600/50 rounded flex items-center justify-center">
-                        <div className="w-8 h-8 rounded-full border border-slate-600/30"></div>
+                {/* 78张牌扇形展开区域 */}
+                <div className="relative w-full max-w-4xl h-48 md:h-64 mt-6 mb-12 flex justify-center">
+                  {visualCards.map((vcard, idx) => {
+                    const total = visualCards.length;
+                    const center = (total - 1) / 2;
+                    const distance = idx - center;
+                    const normalizedDist = distance / center; // -1 to 1
+                    
+                    // 数学建模：计算扇形的角度、横向偏移和抛物线下沉
+                    const angle = normalizedDist * 60; // 展开总角 -60 到 +60 度
+                    const yOffset = Math.pow(normalizedDist, 2) * 90; // 两侧向下沉降曲线
+                    const xOffset = normalizedDist * 45; // 横跨屏幕比例
+
+                    return (
+                      <div 
+                        key={vcard.id}
+                        className="absolute bottom-4 origin-bottom cursor-pointer transition-all duration-300 ease-out"
+                        style={{
+                          left: `calc(50% + ${xOffset}%)`,
+                          transform: `translate(-50%, ${yOffset}px) rotate(${angle}deg)`,
+                          zIndex: vcard.drawn ? 0 : idx,
+                        }}
+                        onMouseEnter={(e) => { if(!vcard.drawn) e.currentTarget.style.zIndex = 200; }}
+                        onMouseLeave={(e) => { if(!vcard.drawn) e.currentTarget.style.zIndex = idx; }}
+                      >
+                        <div 
+                          onClick={() => handleDrawCard(idx)}
+                          className={`
+                            w-8 sm:w-10 md:w-14 aspect-[2/3] rounded-sm md:rounded border border-slate-600/60 bg-slate-800 
+                            transition-transform duration-300 shadow-[0_2px_10px_rgba(0,0,0,0.6)]
+                            ${vcard.drawn ? 'opacity-0 translate-y-20 pointer-events-none' : 'hover:-translate-y-6 hover:shadow-[0_10px_20px_rgba(255,255,255,0.15)] hover:border-slate-400'}
+                          `}
+                        >
+                          {/* 牌背图案修饰 */}
+                          <div className="absolute inset-1 border border-slate-700/50 rounded-sm flex items-center justify-center bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMWUyOTNiIiAvPgo8Y2lyY2xlIGN4PSIyIiBjeT0iMiIgcj0iMSIgZmlsbD0iIzMzNDE1NSIgLz4KPC9zdmc+')]">
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
 
-                <div className="flex justify-center gap-6 md:gap-12 min-h-[160px]">
+                {/* 已抽取的牌槽展示 */}
+                <div className="flex justify-center gap-6 md:gap-12 min-h-[160px] z-10">
                   {["过去", "现在", "未来"].map((pos, idx) => {
                     const card = drawnCards[idx];
                     return (
                       <div key={idx} className="flex flex-col items-center">
-                        <div className="text-xs text-slate-500 mb-2 tracking-widest uppercase">{pos}</div>
+                        <div className="text-[10px] text-slate-600 mb-2 tracking-widest uppercase">{pos}</div>
                         <div className={`
-                          w-20 md:w-28 aspect-[2/3] rounded-lg border flex items-center justify-center p-2 text-center transition-all duration-700 
-                          ${card ? (card.isReversed ? 'border-indigo-500/50 bg-indigo-950/30' : 'border-amber-500/50 bg-amber-950/30') : 'border-dashed border-slate-700 bg-slate-900/50'}
+                          w-20 md:w-28 aspect-[2/3] rounded-lg border flex items-center justify-center p-2 text-center transition-all duration-700 shadow-lg
+                          ${card ? (card.isReversed ? 'border-slate-600 bg-slate-800' : 'border-slate-500 bg-slate-800') : 'border-dashed border-slate-800 bg-transparent shadow-none'}
                         `}>
                           {card ? (
                             <div className={`flex flex-col items-center ${card.isReversed ? 'rotate-180' : ''}`}>
-                              <span className={`text-sm md:text-base font-bold ${card.isReversed ? 'text-indigo-400' : 'text-amber-400'}`}>{card.name}</span>
+                              <span className={`text-sm md:text-base font-medium ${card.isReversed ? 'text-slate-400' : 'text-slate-300'}`}>{card.name}</span>
                             </div>
-                          ) : <span className="text-slate-700 text-2xl">?</span>}
+                          ) : <span className="text-slate-800 text-xl font-serif">?</span>}
                         </div>
                       </div>
                     );
@@ -327,57 +329,59 @@
 
             {step === 3 && (
               <div className="animate-fade-in">
-                <div className="flex flex-wrap justify-center gap-6 md:gap-16 mb-12 border-b border-slate-800 pb-12">
+                <div className="flex flex-wrap justify-center gap-6 md:gap-16 mb-12 border-b border-slate-800/50 pb-12">
                   {drawnCards.map((card, idx) => (
                     <div key={idx} className="flex flex-col items-center w-32 md:w-40">
-                      <div className="text-sm text-slate-400 mb-4 tracking-widest px-4 py-1 bg-slate-900 rounded-full border border-slate-800">{card.position}</div>
+                      <div className="text-[10px] text-slate-500 mb-4 tracking-widest px-4 py-1 bg-slate-900 rounded-full border border-slate-800">{card.position}</div>
                       <div className={`
-                        w-full aspect-[2/3] rounded-xl border-2 flex flex-col items-center justify-center p-4 relative overflow-hidden
-                        ${card.isReversed ? 'border-indigo-600/60 bg-gradient-to-br from-slate-900 to-indigo-950 shadow-[0_0_20px_rgba(79,70,229,0.2)]' : 'border-amber-600/60 bg-gradient-to-br from-slate-900 to-amber-950 shadow-[0_0_20px_rgba(217,119,6,0.2)]'}
+                        w-full aspect-[2/3] rounded-xl border flex flex-col items-center justify-center p-4 relative overflow-hidden
+                        ${card.isReversed ? 'border-slate-700 bg-slate-900 shadow-[0_0_20px_rgba(51,65,85,0.4)]' : 'border-slate-600 bg-slate-800/50 shadow-[0_0_20px_rgba(71,85,105,0.4)]'}
                       `}>
                         <div className={`w-full h-full flex flex-col items-center justify-center ${card.isReversed ? 'rotate-180' : ''}`}>
-                          <div className="text-3xl mb-4 opacity-70">
+                          <div className="text-2xl mb-4 opacity-40 grayscale">
                             {card.type === "大阿尔卡纳" ? "✧" : (card.name.includes("权杖") ? "🔥" : card.name.includes("圣杯") ? "💧" : card.name.includes("宝剑") ? "⚔️" : "🪙")}
                           </div>
-                          <span className={`text-xl font-bold text-center ${card.isReversed ? 'text-indigo-300' : 'text-amber-400'}`}>{card.name}</span>
-                          <span className="text-xs mt-2 text-slate-500">{card.type}</span>
+                          <span className={`text-lg font-serif tracking-widest text-center ${card.isReversed ? 'text-slate-400' : 'text-slate-300'}`}>{card.name}</span>
+                          <span className="text-[10px] mt-2 text-slate-600">{card.type}</span>
                         </div>
                       </div>
-                      <div className={`mt-4 text-sm font-medium ${card.isReversed ? 'text-indigo-400' : 'text-amber-500'}`}>
-                        {card.isReversed ? '逆位 / 能量受阻或反转' : '正位 / 能量顺畅或确立'}
+                      <div className={`mt-4 text-xs font-medium tracking-wider ${card.isReversed ? 'text-slate-500' : 'text-slate-400'}`}>
+                        {card.isReversed ? '[ 逆位形态 ]' : '[ 正位形态 ]'}
                       </div>
                     </div>
                   ))}
                 </div>
 
-                <div className="max-w-3xl mx-auto">
+                <div className="max-w-2xl mx-auto">
                   {!reading && !isReading && (
-                    <div className="text-center">
-                      <button onClick={fetchReading} className="px-8 py-4 bg-slate-100 hover:bg-white text-slate-900 font-bold rounded-lg transition-all shadow-[0_0_20px_rgba(255,255,255,0.2)]">
-                        生成深度客观解析
+                    <div className="text-center mt-16">
+                      <button onClick={fetchReading} className="px-10 py-4 bg-slate-200 hover:bg-white text-slate-950 font-medium rounded-sm transition-all tracking-widest shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                        阅读潜意识的长卷
                       </button>
                     </div>
                   )}
 
                   {isReading && (
-                    <div className="flex flex-col items-center justify-center py-12">
-                      <div className="w-12 h-12 border-4 border-slate-800 border-t-amber-500 rounded-full animate-spin mb-6"></div>
-                      <p className="text-slate-400 tracking-widest animate-pulse">正在解构符号与潜意识的连接...</p>
+                    <div className="flex flex-col items-center justify-center py-20">
+                      <div className="w-8 h-8 border-2 border-slate-800 border-t-slate-400 rounded-full animate-spin mb-6"></div>
+                      <p className="text-xs text-slate-500 tracking-widest animate-pulse font-serif">正将象征线索剥离并缝合至您的现实...</p>
                     </div>
                   )}
 
                   {reading && !isReading && (
-                    <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-10 shadow-2xl relative">
-                      <h2 className="text-xl font-serif text-slate-200 mb-6 border-b border-slate-800 pb-4">洞察报告</h2>
+                    <div className="bg-transparent relative mt-8 animate-fade-in">
+                      <h2 className="text-sm font-serif text-slate-500 mb-8 text-center tracking-[0.3em] uppercase opacity-70">
+                        - The Narrative Analysis -
+                      </h2>
                       
-                      {/* 渲染区域 */}
-                      <div className="max-w-none">
-                        {renderMarkdown(reading)}
+                      {/* 沉浸式长文渲染区域 */}
+                      <div className="max-w-none px-2 sm:px-6">
+                        {renderNarrative(reading)}
                       </div>
 
-                      <div className="mt-12 pt-8 border-t border-slate-800 text-center">
-                        <button onClick={resetReading} className="px-6 py-2 border border-slate-600 hover:border-slate-400 text-slate-400 rounded transition-colors text-sm">
-                          重新凝视 (Reset)
+                      <div className="mt-20 pt-8 border-t border-slate-800/50 text-center">
+                        <button onClick={resetReading} className="px-6 py-2 border border-slate-800 hover:border-slate-500 text-slate-500 rounded-sm transition-colors text-xs tracking-widest">
+                          归零 (Reset)
                         </button>
                       </div>
                     </div>
