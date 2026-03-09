@@ -72,7 +72,7 @@
       const [isReading, setIsReading] = useState(false);
       const [error, setError] = useState('');
       
-      // 使用 useRef 替代 useState 来管理输入框，解决打字极其卡顿的问题 (避免频繁重渲染)
+      // 使用 useRef 替代 useState 来管理输入框，解决打字极其卡顿的问题
       const keyInputRef = useRef(null);
       const questionInputRef = useRef(null);
       
@@ -93,7 +93,6 @@
       };
 
       const handleStartDraw = () => {
-        // 从 ref 获取当前的输入值，而不是响应每次敲击
         const currentKey = keyInputRef.current?.value || '';
         const currentQuestion = questionInputRef.current?.value || '';
 
@@ -106,10 +105,7 @@
           return;
         }
         
-        // 验证通过，保存 Key 到本地
         localStorage.setItem('tarot_api_key', currentKey.trim());
-        
-        // 记录最终数据并前往下一步
         setFinalData({ key: currentKey.trim(), question: currentQuestion.trim() });
         setError('');
         setStep(2);
@@ -158,6 +154,7 @@
 2. 直接开始分析。语气要中立、专业、详实。
 3. 严格遵循正逆位的传统牌意，结合心理原型进行解构。如果牌意很差请客观指出，不要过度粉饰。
 4. 使用 Markdown 格式进行排版输出。
+5. 绝对禁止使用 ** 进行加粗排版，不需要强调任何词语，保持视觉上的绝对清爽与克制。
 
 输出结构必须包含：
 ### 核心脉络
@@ -199,30 +196,33 @@
         }
       };
 
+      // 重写后的渲染器：双重保险防止 **，并调整为小字体、冷色调
       const renderMarkdown = (text) => {
         if (!text) return null;
-        const blocks = text.split('\n\n');
+        // 物理剥离大模型可能强行输出的 ** 符号
+        const cleanText = text.replace(/\*\*/g, '');
+        const blocks = cleanText.split('\n\n');
+        
         return blocks.map((block, idx) => {
           if (block.startsWith('### ')) {
-            return <h3 key={idx} className="text-xl font-bold text-amber-300 mt-6 mb-2">{block.replace('### ', '')}</h3>;
+            // 标题：改小字号(text-base)，改颜色(text-slate-300)，增加左侧克制的细线修饰
+            return (
+              <h3 key={idx} className="text-base font-bold text-slate-300 mt-6 mb-3 border-l-2 border-slate-600 pl-3">
+                {block.replace('### ', '')}
+              </h3>
+            );
           }
-          let formattedBlock = block;
-          const boldRegex = /\*\*(.*?)\*\*/g;
-          const parts = [];
-          let lastIndex = 0;
-          let match;
-          while ((match = boldRegex.exec(formattedBlock)) !== null) {
-            if (match.index > lastIndex) parts.push(formattedBlock.substring(lastIndex, match.index));
-            parts.push(<strong key={match.index} className="text-amber-100">{match[1]}</strong>);
-            lastIndex = match.index + match[0].length;
-          }
-          if (lastIndex < formattedBlock.length) parts.push(formattedBlock.substring(lastIndex));
-          return <p key={idx} className="mb-4 text-slate-300 leading-relaxed tracking-wide">{parts.length > 0 ? parts : block}</p>;
+          // 正文：改小字号(text-sm)，改颜色(text-slate-400)，去除任何花哨的染色
+          return (
+            <p key={idx} className="mb-4 text-sm text-slate-400 leading-relaxed tracking-wide text-justify">
+              {block}
+            </p>
+          );
         });
       };
 
       return (
-        <div className="min-h-screen selection:bg-amber-500/30">
+        <div className="min-h-screen selection:bg-slate-500/30">
           <header className="py-8 text-center border-b border-amber-900/30 bg-slate-900/50">
             <h1 className="text-3xl font-serif tracking-widest text-amber-500">✦ 客观塔罗洞察 ✦</h1>
             <p className="mt-2 text-sm text-slate-500 tracking-widest uppercase">Psychological Archetype Analysis</p>
@@ -368,12 +368,15 @@
 
                   {reading && !isReading && (
                     <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-6 md:p-10 shadow-2xl relative">
-                      <h2 className="text-2xl font-serif text-slate-100 mb-8 border-b border-slate-800 pb-4">洞察报告</h2>
-                      <div className="prose prose-invert prose-amber max-w-none">
+                      <h2 className="text-xl font-serif text-slate-200 mb-6 border-b border-slate-800 pb-4">洞察报告</h2>
+                      
+                      {/* 渲染区域 */}
+                      <div className="max-w-none">
                         {renderMarkdown(reading)}
                       </div>
+
                       <div className="mt-12 pt-8 border-t border-slate-800 text-center">
-                        <button onClick={resetReading} className="px-6 py-2 border border-slate-600 hover:border-amber-500 hover:text-amber-400 text-slate-400 rounded transition-colors text-sm">
+                        <button onClick={resetReading} className="px-6 py-2 border border-slate-600 hover:border-slate-400 text-slate-400 rounded transition-colors text-sm">
                           重新凝视 (Reset)
                         </button>
                       </div>
