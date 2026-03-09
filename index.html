@@ -32,7 +32,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect } = React;
+    const { useState, useEffect, useRef } = React;
 
     // --- 基础数据：78张标准韦特塔罗牌 ---
     const SUITS = ["权杖", "圣杯", "宝剑", "星币"];
@@ -65,19 +65,21 @@
 
     function App() {
       const [step, setStep] = useState(1);
-      const [deepseekKey, setDeepseekKey] = useState(''); // 本地储存Key
-      const [question, setQuestion] = useState('');
       const [deck, setDeck] = useState([]);
       const [drawnCards, setDrawnCards] = useState([]);
       const [visualCards, setVisualCards] = useState([]);
       const [reading, setReading] = useState('');
       const [isReading, setIsReading] = useState(false);
       const [error, setError] = useState('');
+      
+      // 使用 useRef 替代 useState 来管理输入框，解决打字极其卡顿的问题 (避免频繁重渲染)
+      const keyInputRef = useRef(null);
+      const questionInputRef = useRef(null);
+      
+      // 用于在步骤之间传递最终确认的数据
+      const [finalData, setFinalData] = useState({ key: '', question: '' });
 
       useEffect(() => {
-        // 尝试从本地存储恢复 API Key，避免刷新后重填
-        const savedKey = localStorage.getItem('tarot_api_key');
-        if (savedKey) setDeepseekKey(savedKey);
         resetReading();
       }, []);
 
@@ -90,21 +92,25 @@
         setVisualCards(Array.from({ length: 21 }, (_, i) => ({ id: `vcard-${i}`, drawn: false })));
       };
 
-      const handleKeyChange = (e) => {
-        const val = e.target.value;
-        setDeepseekKey(val);
-        localStorage.setItem('tarot_api_key', val); // 保存到浏览器本地
-      };
-
       const handleStartDraw = () => {
-        if (!deepseekKey.trim()) {
+        // 从 ref 获取当前的输入值，而不是响应每次敲击
+        const currentKey = keyInputRef.current?.value || '';
+        const currentQuestion = questionInputRef.current?.value || '';
+
+        if (!currentKey.trim()) {
           setError('请提供 DeepSeek API Key (它仅保存在您的浏览器本地，不会上传)');
           return;
         }
-        if (!question.trim()) {
+        if (!currentQuestion.trim()) {
           setError('请输入您想洞察的问题。');
           return;
         }
+        
+        // 验证通过，保存 Key 到本地
+        localStorage.setItem('tarot_api_key', currentKey.trim());
+        
+        // 记录最终数据并前往下一步
+        setFinalData({ key: currentKey.trim(), question: currentQuestion.trim() });
         setError('');
         setStep(2);
       };
@@ -140,7 +146,7 @@
         const prompt = `你是一位客观、冷静、具备深厚心理学和象征学知识的塔罗分析师。你的任务是为用户提供一次具有深度和信息量的塔罗牌阵解读。我们不宣扬宿命论，而是将塔罗作为投射潜意识和客观局面的工具。
 
 当前牌阵：时间流（过去、现在、未来）
-用户探索的核心问题：${question}
+用户探索的核心问题：${finalData.question}
 
 抽出的牌面：
 1. 【过去】影响局面的历史根源：${drawnCards[0].name} - ${drawnCards[0].isReversed ? '逆位' : '正位'}
@@ -174,7 +180,7 @@
             method: 'POST',
             headers: { 
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${deepseekKey.trim()}`
+              'Authorization': `Bearer ${finalData.key}`
             },
             body: JSON.stringify(payload)
           });
@@ -240,10 +246,10 @@
                     </label>
                     <input 
                       type="password"
+                      ref={keyInputRef}
+                      defaultValue={localStorage.getItem('tarot_api_key') || ''}
                       className="w-full bg-slate-900 border border-slate-700 rounded p-3 text-slate-200 focus:outline-none focus:border-amber-500 transition-colors text-sm font-mono placeholder-slate-600"
                       placeholder="sk-..."
-                      value={deepseekKey}
-                      onChange={handleKeyChange}
                     />
                     <p className="text-[10px] text-slate-500 mt-2">
                       安全保障：您的 Key 仅保留在您的浏览器本地缓存中，直接请求 DeepSeek 官方接口，绝不经过任何第三方服务器。
@@ -254,10 +260,10 @@
                     占卜并非预知未来，而是借由随机的视觉符号，照见潜意识。<br/>请尽可能客观、具体地描述你当下的困惑。
                   </p>
                   <textarea 
+                    ref={questionInputRef}
+                    defaultValue=""
                     className="w-full h-32 bg-slate-950 border border-slate-700 rounded-lg p-4 text-slate-200 focus:outline-none focus:border-amber-500 transition-colors resize-none placeholder-slate-600"
                     placeholder="例如：我目前在职业发展上遇到了瓶颈，想知道继续留在这里还是寻找新机会更利于我的长期发展？"
-                    value={question}
-                    onChange={(e) => setQuestion(e.target.value)}
                   />
                   <button 
                     onClick={handleStartDraw}
