@@ -22,6 +22,49 @@
       to { opacity: 1; transform: translateY(0); }
     }
     .animate-fade-in { animation: fadeIn 0.8s ease-out forwards; }
+    
+    /* 3D 核心属性保留 */
+    .preserve-3d { transform-style: preserve-3d; }
+    .backface-hidden { backface-visibility: hidden; -webkit-backface-visibility: hidden; }
+
+    /* 终极解法：双层动画隔离，彻底解决透明度破坏 3D 空间导致的穿模 Bug */
+    /* 1. 外层负责物理飞行轨迹与淡入 */
+    @keyframes flyInTrack {
+      0% { transform: translate3d(var(--start-x, 0), -200px, 0) rotateZ(var(--start-angle, 0deg)) scale(0.6); opacity: 0; }
+      5% { opacity: 1; }
+      40%, 100% { transform: translate3d(0, 0, 0) rotateZ(0deg) scale(1); opacity: 1; }
+    }
+    .animate-fly-track { animation: flyInTrack 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; }
+
+    /* 2. 内层负责建立独立纯净的 3D 空间进行翻转 */
+    @keyframes flip3D {
+      0%, 40% { transform: perspective(1000px) rotateY(-180deg); }
+      55% { transform: perspective(1000px) rotateY(-180deg); }
+      75% { transform: perspective(1000px) translateZ(60px) translateY(-25px) rotateY(-90deg) scale(1.15); }
+      100% { transform: perspective(1000px) translateZ(0) translateY(0) rotateY(0deg) scale(1); }
+    }
+    .animate-flip-3d { animation: flip3D 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) forwards; transform-style: preserve-3d; }
+
+    /* 高性能纯 CSS 扇形卡牌悬停引擎（解决 React 事件卡顿和不准） */
+    .tarot-fan-card {
+      left: calc(50% + var(--x-offset));
+      transform: translate(-50%, var(--y-offset)) rotate(var(--angle));
+      transition: transform 0.4s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.4s;
+    }
+    .tarot-fan-card:not(.drawn):hover { 
+      z-index: 200 !important; 
+    }
+    .tarot-fan-card:not(.drawn):hover .inner-card {
+      transform: translateY(-30px) scale(1.1);
+      border-color: #94a3b8;
+      box-shadow: 0 15px 25px rgba(255,255,255,0.2);
+    }
+    .tarot-fan-card.drawn {
+      opacity: 0;
+      transform: translate(-50%, calc(var(--y-offset) + 100px)) rotate(var(--angle)) scale(0.5);
+      pointer-events: none;
+    }
+    
     /* 隐藏滚动条但保留滚动功能 */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: #0f172a; }
@@ -74,16 +117,18 @@
       const keyInputRef = useRef(null);
       const questionInputRef = useRef(null);
       
-      const [finalData, setFinalData] = useState({ key: '', question: '' });
+      // 牌阵选择状态
+      const [spreadType, setSpreadType] = useState('3-cards'); 
+      const [finalData, setFinalData] = useState({ key: '', question: '', spreadType: '3-cards' });
 
-      // --- 新增：追问与历史记录系统状态 ---
-      const [targetDrawCount, setTargetDrawCount] = useState(3); // 当前目标抽牌数，追问时递增
-      const [displayItems, setDisplayItems] = useState([]); // 存放解读和追问的对话流
-      const [chatHistory, setChatHistory] = useState([]); // 传给 DeepSeek 的上下文记忆
-      const [followUpCount, setFollowUpCount] = useState(0); // 追问次数 (上限3)
+      // --- 追问与历史记录系统状态 ---
+      const [targetDrawCount, setTargetDrawCount] = useState(3); 
+      const [displayItems, setDisplayItems] = useState([]); 
+      const [chatHistory, setChatHistory] = useState([]); 
+      const [followUpCount, setFollowUpCount] = useState(0); 
       const [currentFollowUpQuestion, setCurrentFollowUpQuestion] = useState(''); 
-      const [sessionId, setSessionId] = useState(''); // 本次解读的唯一ID
-      const [showHistory, setShowHistory] = useState(false); // 历史记录弹窗
+      const [sessionId, setSessionId] = useState(''); 
+      const [showHistory, setShowHistory] = useState(false); 
       const [historyList, setHistoryList] = useState([]);
 
       useEffect(() => {
@@ -107,7 +152,6 @@
         setChatHistory([]);
         setFollowUpCount(0);
         setCurrentFollowUpQuestion('');
-        setTargetDrawCount(3);
         setError('');
         setStep(1);
         setVisualCards(Array.from({ length: 78 }, (_, i) => ({ id: `vcard-${i}`, drawn: false })));
@@ -127,8 +171,11 @@
         }
         
         localStorage.setItem('tarot_api_key', currentKey.trim());
-        setFinalData({ key: currentKey.trim(), question: currentQuestion.trim() });
-        setSessionId(Date.now().toString()); // 为本次生成独立档案ID
+        setFinalData({ key: currentKey.trim(), question: currentQuestion.trim(), spreadType });
+        setSessionId(Date.now().toString()); 
+        
+        // 依据牌阵决定初始需抽取的牌数
+        setTargetDrawCount(spreadType === '1-card' ? 1 : 3);
         setError('');
         setStep(2);
       };
@@ -145,16 +192,31 @@
         const drawnCard = actualDeck.pop();
         const isReversed = Math.random() > 0.5;
         
-        // 动态支持追加牌的占位名
-        const positions = ["过去", "现在", "未来", "追问一", "追问二", "追问三"];
-        const cardData = { ...drawnCard, isReversed, position: positions[drawnCards.length] };
+        // 动态支持追加牌及不同牌阵的占位名
+        const basePositions = spreadType === '1-card' ? ["核心指示"] : ["过去", "现在", "未来"];
+        const positions = [...basePositions, "追问一", "追问二", "追问三"];
+        
+        // 计算抽取的真实卡牌角度和横坐标，让它能顺着轨迹飞出
+        const total = visualCards.length;
+        const center = (total - 1) / 2;
+        const normalizedDist = (visualIndex - center) / center; 
+        const startAngle = normalizedDist * 60; 
+        const startX = normalizedDist * 200; // 对应扇形在视觉上的横向跨度
+
+        const cardData = { 
+          ...drawnCard, 
+          isReversed, 
+          position: positions[drawnCards.length],
+          startAngle,
+          startX
+        };
 
         setDeck(actualDeck);
         const newDrawnCards = [...drawnCards, cardData];
         setDrawnCards(newDrawnCards);
 
         if (newDrawnCards.length === targetDrawCount) {
-          setTimeout(() => setStep(3), 1200);
+          setTimeout(() => setStep(3), 2400); // 延长等待，确保最后一张牌走完 "飞入->落地->翻开" 动画全周期
         }
       };
 
@@ -164,6 +226,7 @@
 
         const isFollowUp = displayItems.length > 0;
         const activeKey = finalData.key || localStorage.getItem('tarot_api_key');
+        const activeSpread = finalData.spreadType;
 
         if (!activeKey) {
             setError('缺失 API Key，请返回首页重新输入。');
@@ -174,24 +237,29 @@
         let newUserMessage = '';
 
         if (!isFollowUp) {
-            // 首轮解读
-            const prompt = `你是一位一针见血、深谙人性的顶级心理分析师。
+            // 根据牌阵类型动态生成首轮 Prompt 的卡牌描述
+            let initialCardsText = '';
+            if (activeSpread === '1-card') {
+                initialCardsText = `1.[核心指示] ${drawnCards[0].name} (${drawnCards[0].isReversed ? '逆位' : '正位'})`;
+            } else {
+                initialCardsText = `1.[过去根源] ${drawnCards[0].name} (${drawnCards[0].isReversed ? '逆位' : '正位'})\n2.[当下面貌] ${drawnCards[1].name} (${drawnCards[1].isReversed ? '逆位' : '正位'})\n3.[演进趋势] ${drawnCards[2].name} (${drawnCards[2].isReversed ? '逆位' : '正位'})`;
+            }
+
+            const prompt = `你是一位兼具深邃洞察力与极高同理心的顶级心理分析师。
 
 用户当前的困境是：【${finalData.question}】
-潜意识投射的三张牌：
-1.[过去根源] ${drawnCards[0].name} (${drawnCards[0].isReversed ? '逆位' : '正位'})
-2.[当下面貌] ${drawnCards[1].name} (${drawnCards[1].isReversed ? '逆位' : '正位'})
-3.[演进趋势] ${drawnCards[2].name} (${drawnCards[2].isReversed ? '逆位' : '正位'})
+潜意识投射的牌面：
+${initialCardsText}
 
 【最高纪律指令（违反即判失败）】：
-1. 严禁掉书袋：绝对不许单独解释任何一张牌的通用含义！不许说“这张牌代表什么”。用户不需要听课，需要的是对现实困境的直接穿透。
-2. 彻底绑定现实：你必须把这三张牌的象征意义，【直接翻译】成用户在上述“困境”中具体经历了什么、正在害怕什么、未来可能面对什么。每一句话都要像锥子一样扎进用户的问题里。
-3. 浑然一体的故事线：禁止分割过去、现在、未来。禁止使用任何小标题。请写一篇连贯、紧凑、逻辑严密的心理推演长文。像讲一个因果相连的故事一样，从历史的病灶平滑推演到当下的挣扎，最后顺理成章地给出破局的行动指南。
-4. 纯净输出：物理级禁止使用所有的Markdown符号（禁止星号、井号、列表符号），保持输出如实体印刷书籍般的纯净、清冷与高级。`;
+1. 严禁掉书袋：绝对不许单独解释任何一张牌的通用含义！不许说“这张牌代表什么”。用户需要的是对现实困境的直接穿透。
+2. 建设性与积极暗示：你必须把牌面的象征意义，【直接翻译】成用户在现实境遇中面临的课题。客观剖析问题的核心，但务必带有积极的建设性。用温和、坚定且富有同理心的语言，接纳用户的恐惧，并给出能激发内在力量的破局视角，切忌一味严苛或打击用户。
+3. 浑然一体的故事线：禁止使用任何小标题。请写一篇连贯、紧凑的心理推演长文。像讲一个因果相连的故事一样，平滑推演当下的挣扎，最后顺理成章地给出充满希望的行动指南。
+4. 纯净输出：物理级禁止使用所有的Markdown符号（禁止星号、井号、列表符号），保持输出如实体印刷书籍般的纯净与高级。`;
             
             newUserMessage = prompt;
             payloadMessages = [
-                { role: "system", content: "你是一个极其犀利的现实剖析引擎，客观、无情但直指核心。拒绝任何“AI味”的套话、废话和虚假的安慰。" },
+                { role: "system", content: "你是一位兼具客观洞察与人文关怀的心理分析师。你的语言要如实反映现状，但同时也要像温和的灯塔，给予用户积极的心理暗示与力量。拒绝任何“AI味”的机械套话和虚假的安慰。" },
                 { role: "user", content: newUserMessage }
             ];
         } else {
@@ -201,9 +269,9 @@
 为此追问追加抽取的指示牌：${newCard.name} (${newCard.isReversed ? '逆位' : '正位'})
 
 【最高纪律指令】：
-1. 结合之前的语境，直接针对上述“追问”进行犀利、冷峻的解答。
-2. 严禁单独解释牌意，直接将新牌的隐喻缝合进用户的追问中，给出直接的洞见或建议。
-3. 不要重复之前已经说过的结论，像连载小说的最新一章一样，推动推演。
+1. 结合之前的语境，直接针对上述“追问”进行客观、温和且具有启发性的解答，给予积极的心理暗示。
+2. 严禁单独解释牌意，直接将新牌的隐喻缝合进用户的追问中，给出具有建设性的洞见或建议。
+3. 不要重复之前已经说过的结论，像连载小说的最新一章一样，推动推演，化解用户的焦虑。
 4. 物理级禁止使用所有的Markdown符号（禁止星号、井号、列表符号）。`;
 
             newUserMessage = prompt;
@@ -247,7 +315,7 @@
           setDisplayItems(newDisplayItems);
 
           // 持久化保存至本地历史档案
-          saveToHistory(sessionId, finalData.question, drawnCards, newDisplayItems);
+          saveToHistory(sessionId, finalData.question, drawnCards, newDisplayItems, activeSpread);
 
         } catch (err) {
           setError(`灵感链接中断: ${err.message}。请检查网络或 API Key。`);
@@ -256,10 +324,10 @@
         }
       };
 
-      const saveToHistory = (id, question, cards, items) => {
+      const saveToHistory = (id, question, cards, items, sType) => {
         try {
             const hist = JSON.parse(localStorage.getItem('tarot_history') || '[]');
-            const record = { id, date: new Date().toLocaleString(), question, cards, displayItems: items };
+            const record = { id, date: new Date().toLocaleString(), question, cards, displayItems: items, spreadType: sType };
             const existingIdx = hist.findIndex(h => h.id === id);
             if (existingIdx >= 0) hist[existingIdx] = record;
             else hist.unshift(record); // 新记录插在最前
@@ -268,7 +336,8 @@
       };
 
       const handleRestoreHistory = (record) => {
-          setFinalData({ key: localStorage.getItem('tarot_api_key') || '', question: record.question });
+          setFinalData({ key: localStorage.getItem('tarot_api_key') || '', question: record.question, spreadType: record.spreadType || '3-cards' });
+          setSpreadType(record.spreadType || '3-cards');
           setSessionId(record.id);
           setDrawnCards(record.cards);
           setDisplayItems(record.displayItems);
@@ -333,6 +402,27 @@
                     />
                   </div>
 
+                  {/* 牌阵深度选择器 */}
+                  <div className="mb-6 w-full">
+                    <label className="block text-xs text-slate-500 mb-3 uppercase tracking-widest text-center">选择探寻的深度</label>
+                    <div className="flex gap-4 justify-center">
+                      <button 
+                        onClick={() => setSpreadType('1-card')}
+                        className={`flex-1 py-3 px-2 rounded-lg border transition-all ${spreadType === '1-card' ? 'border-slate-500 bg-slate-800 text-slate-300' : 'border-slate-800/80 bg-slate-950/50 text-slate-500 hover:border-slate-700'}`}
+                      >
+                        <div className="text-sm tracking-widest font-serif">单一指引</div>
+                        <div className="text-[10px] mt-1 opacity-70 font-sans">抽取 1 张核心牌</div>
+                      </button>
+                      <button 
+                        onClick={() => setSpreadType('3-cards')}
+                        className={`flex-1 py-3 px-2 rounded-lg border transition-all ${spreadType === '3-cards' ? 'border-slate-500 bg-slate-800 text-slate-300' : 'border-slate-800/80 bg-slate-950/50 text-slate-500 hover:border-slate-700'}`}
+                      >
+                        <div className="text-sm tracking-widest font-serif">时间之流</div>
+                        <div className="text-[10px] mt-1 opacity-70 font-sans">过去 · 现在 · 未来</div>
+                      </button>
+                    </div>
+                  </div>
+
                   <p className="text-xs text-slate-500 mb-4 text-center leading-relaxed">
                     请尽可能客观、具体地描述当下的困惑。
                   </p>
@@ -356,7 +446,7 @@
               <div className="animate-fade-in flex flex-col items-center w-full overflow-hidden">
                 <div className="text-center mb-6">
                   <h2 className="text-xl text-slate-300 mb-2 font-serif">
-                    {targetDrawCount === 3 ? "随直觉剥落三块碎片" : "为你的追问抽取一张指示牌"}
+                    {drawnCards.length >= (spreadType === '1-card' ? 1 : 3) && followUpCount > 0 ? "为你的追问抽取一张指示牌" : "随直觉剥落碎片"}
                   </h2>
                   <p className="text-slate-500 text-xs tracking-widest">
                     [ {drawnCards.length} / {targetDrawCount} ]
@@ -368,34 +458,25 @@
                   {visualCards.map((vcard, idx) => {
                     const total = visualCards.length;
                     const center = (total - 1) / 2;
-                    const distance = idx - center;
-                    const normalizedDist = distance / center; // -1 to 1
+                    const normalizedDist = (idx - center) / center; 
                     
-                    // 数学建模：计算扇形的角度、横向偏移和抛物线下沉
-                    const angle = normalizedDist * 60; // 展开总角 -60 到 +60 度
-                    const yOffset = Math.pow(normalizedDist, 2) * 90; // 两侧向下沉降曲线
-                    const xOffset = normalizedDist * 45; // 横跨屏幕比例
+                    const angle = normalizedDist * 60; 
+                    const yOffset = Math.pow(normalizedDist, 2) * 90; 
+                    const xOffset = normalizedDist * 45; 
 
                     return (
                       <div 
                         key={vcard.id}
-                        className="absolute bottom-4 origin-bottom cursor-pointer transition-all duration-300 ease-out"
+                        className={`tarot-fan-card absolute bottom-4 origin-bottom cursor-pointer ease-out ${vcard.drawn ? 'drawn' : ''}`}
                         style={{
-                          left: `calc(50% + ${xOffset}%)`,
-                          transform: `translate(-50%, ${yOffset}px) rotate(${angle}deg)`,
+                          '--x-offset': `${xOffset}%`,
+                          '--y-offset': `${yOffset}px`,
+                          '--angle': `${angle}deg`,
                           zIndex: vcard.drawn ? 0 : idx,
                         }}
-                        onMouseEnter={(e) => { if(!vcard.drawn) e.currentTarget.style.zIndex = 200; }}
-                        onMouseLeave={(e) => { if(!vcard.drawn) e.currentTarget.style.zIndex = idx; }}
+                        onClick={() => handleDrawCard(idx)}
                       >
-                        <div 
-                          onClick={() => handleDrawCard(idx)}
-                          className={`
-                            w-8 sm:w-10 md:w-14 aspect-[2/3] rounded-sm md:rounded border border-slate-600/60 bg-slate-800 
-                            transition-transform duration-300 shadow-[0_2px_10px_rgba(0,0,0,0.6)]
-                            ${vcard.drawn ? 'opacity-0 translate-y-20 pointer-events-none' : 'hover:-translate-y-6 hover:shadow-[0_10px_20px_rgba(255,255,255,0.15)] hover:border-slate-400'}
-                          `}
-                        >
+                        <div className="inner-card w-8 sm:w-10 md:w-14 aspect-[2/3] rounded-sm md:rounded border border-slate-600/60 bg-slate-800 transition-all duration-300 shadow-[0_2px_10px_rgba(0,0,0,0.6)] relative">
                           <div className="absolute inset-1 border border-slate-700/50 rounded-sm flex items-center justify-center bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMWUyOTNiIiAvPgo8Y2lyY2xlIGN4PSIyIiBjeT0iMiIgcj0iMSIgZmlsbD0iIzMzNDE1NSIgLz4KPC9zdmc+')]">
                           </div>
                         </div>
@@ -404,24 +485,44 @@
                   })}
                 </div>
 
-                {/* 已抽取的牌槽展示 (灵活适应追问数量) */}
+                {/* 已抽取的牌槽展示：双层架构彻底解决透视穿模 Bug */}
                 <div className="flex justify-center flex-wrap gap-6 md:gap-12 min-h-[160px] z-10 px-4">
                   {Array.from({ length: targetDrawCount }).map((_, idx) => {
                     const card = drawnCards[idx];
-                    const positions = ["过去", "现在", "未来", "追问一", "追问二", "追问三"];
+                    const basePositions = spreadType === '1-card' ? ["核心指示"] : ["过去", "现在", "未来"];
+                    const positions = [...basePositions, "追问一", "追问二", "追问三"];
                     const posName = positions[idx];
                     return (
                       <div key={idx} className="flex flex-col items-center">
                         <div className="text-[10px] text-slate-600 mb-2 tracking-widest uppercase">{posName}</div>
-                        <div className={`
-                          w-16 md:w-24 aspect-[2/3] rounded-lg border flex items-center justify-center p-2 text-center transition-all duration-700 shadow-lg
-                          ${card ? (card.isReversed ? 'border-slate-600 bg-slate-800' : 'border-slate-500 bg-slate-800') : 'border-dashed border-slate-800 bg-transparent shadow-none'}
-                        `}>
+                        <div 
+                          className={`
+                            relative w-16 md:w-24 aspect-[2/3] rounded-lg border transition-all duration-700
+                            ${card ? 'border-transparent bg-transparent' : 'border-dashed border-slate-800 bg-transparent'}
+                          `}
+                        >
                           {card ? (
-                            <div className={`flex flex-col items-center ${card.isReversed ? 'rotate-180' : ''}`}>
-                              <span className={`text-xs md:text-sm font-medium ${card.isReversed ? 'text-slate-400' : 'text-slate-300'}`}>{card.name}</span>
+                            <div 
+                              className="absolute inset-0 w-full h-full animate-fly-track"
+                              style={{
+                                '--start-angle': `${card.startAngle}deg`,
+                                '--start-x': `${card.startX}px`
+                              }}
+                            >
+                              <div className="w-full h-full relative animate-flip-3d preserve-3d">
+                                {/* 卡牌背面 (在飞翔及落地阶段朝上，rotateY=180deg) */}
+                                <div className="absolute inset-0 w-full h-full rounded-lg border border-slate-600/60 bg-slate-800 backface-hidden shadow-[0_5px_15px_rgba(0,0,0,0.5)] flex items-center justify-center" style={{ transform: 'rotateY(180deg)' }}>
+                                  <div className="absolute inset-1 border border-slate-700/50 rounded-sm bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI0IiBoZWlnaHQ9IjQiPgo8cmVjdCB3aWR0aD0iNCIgaGVpZ2h0PSI0IiBmaWxsPSIjMWUyOTNiIiAvPgo8Y2lyY2xlIGN4PSIyIiBjeT0iMiIgcj0iMSIgZmlsbD0iIzMzNDE1NSIgLz4KPC9zdmc+')]"></div>
+                                </div>
+                                {/* 卡牌正面 (在动画末端翻开，rotateY=0deg) */}
+                                <div className={`absolute inset-0 w-full h-full rounded-lg border flex flex-col items-center justify-center p-2 text-center backface-hidden bg-slate-800 shadow-[0_5px_15px_rgba(0,0,0,0.5)] ${card.isReversed ? 'border-slate-600' : 'border-slate-500'}`} style={{ transform: 'rotateY(0deg)' }}>
+                                  <div className={`flex flex-col items-center justify-center w-full h-full ${card.isReversed ? 'rotate-180' : ''}`}>
+                                    <span className={`text-xs md:text-sm font-medium ${card.isReversed ? 'text-slate-400' : 'text-slate-300'}`}>{card.name}</span>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
-                          ) : <span className="text-slate-800 text-xl font-serif">?</span>}
+                          ) : <span className="text-slate-800 text-xl font-serif absolute inset-0 flex items-center justify-center">?</span>}
                         </div>
                       </div>
                     );
@@ -432,7 +533,7 @@
 
             {step === 3 && (
               <div className="animate-fade-in">
-                {/* 顶部阵列展示：完美复用旧UI，自动包裹多出的追问牌 */}
+                {/* 顶部阵列展示：复用且彻底剔除了这里多余的重复翻转特效 */}
                 <div className="flex flex-wrap justify-center gap-6 md:gap-16 mb-12 border-b border-slate-800/50 pb-12">
                   {drawnCards.map((card, idx) => (
                     <div key={idx} className="flex flex-col items-center w-28 md:w-36">
@@ -496,7 +597,7 @@
                       ))}
 
                       {/* 抽完追问牌但未解析 */}
-                      {!isReading && drawnCards.length > displayItems.length + 2 && (
+                      {!isReading && drawnCards.length > displayItems.length + (spreadType === '1-card' ? 0 : 2) && (
                         <div className="mt-12 mb-8 text-center animate-fade-in">
                           <button onClick={fetchReading} className="px-10 py-4 bg-slate-200 hover:bg-white text-slate-950 font-medium rounded-sm transition-all tracking-widest shadow-[0_0_15px_rgba(255,255,255,0.1)]">
                             洞悉追问的启示
@@ -504,8 +605,8 @@
                         </div>
                       )}
 
-                      {/* 追问加载 UI（放在最底部，避免视野盲区） */}
-                      {isReading && drawnCards.length > displayItems.length + 2 && (
+                      {/* 追问加载 UI */}
+                      {isReading && drawnCards.length > displayItems.length + (spreadType === '1-card' ? 0 : 2) && (
                         <div className="flex flex-col items-center justify-center py-16 animate-fade-in">
                           <div className="w-8 h-8 border-2 border-slate-800 border-t-slate-400 rounded-full animate-spin mb-6"></div>
                           <p className="text-xs text-slate-500 tracking-widest animate-pulse font-serif">正将象征线索剥离并缝合至您的现实...</p>
@@ -513,7 +614,7 @@
                       )}
 
                       {/* 追问区域 (解读完成且未达到上限) */}
-                      {!isReading && followUpCount < 3 && drawnCards.length === displayItems.length + 2 && (
+                      {!isReading && followUpCount < 3 && drawnCards.length === displayItems.length + (spreadType === '1-card' ? 0 : 2) && (
                         <div className="mt-16 border-t border-slate-800/50 pt-12 px-2 sm:px-6">
                           <h3 className="text-sm text-slate-400 font-serif mb-6 tracking-widest text-center">潜意识的余波 (追问 {followUpCount + 1}/3)</h3>
                           <textarea
@@ -537,7 +638,7 @@
                       )}
 
                       {/* 达到上限提示 */}
-                      {!isReading && followUpCount >= 3 && drawnCards.length === displayItems.length + 2 && (
+                      {!isReading && followUpCount >= 3 && drawnCards.length === displayItems.length + (spreadType === '1-card' ? 0 : 2) && (
                         <div className="mt-16 pt-8 border-t border-slate-800/50 text-center animate-fade-in">
                           <p className="text-sm text-slate-500 tracking-widest mb-6">您的追问已达上限，请开启新的探寻。</p>
                           <button onClick={resetReading} className="px-6 py-2 border border-slate-800 hover:border-slate-500 text-slate-500 rounded-sm transition-colors text-xs tracking-widest">
@@ -547,7 +648,7 @@
                       )}
 
                       {/* 未达上限也可随时退出归零 */}
-                      {!isReading && followUpCount < 3 && drawnCards.length === displayItems.length + 2 && (
+                      {!isReading && followUpCount < 3 && drawnCards.length === displayItems.length + (spreadType === '1-card' ? 0 : 2) && (
                         <div className="mt-8 text-center">
                           <button onClick={resetReading} className="px-6 py-2 border border-transparent hover:border-slate-800 text-slate-600 hover:text-slate-500 rounded-sm transition-colors text-xs tracking-widest">
                               结束并归零 (Reset)
@@ -582,7 +683,7 @@
                           <span className="text-[10px] text-slate-600 tracking-widest whitespace-nowrap mt-1">{record.date}</span>
                         </div>
                         <div className="text-xs text-slate-500 tracking-widest mb-6 opacity-70">
-                          牌阵: {record.cards?.map(c => c.name).join(' / ')}
+                          牌阵 ({record.spreadType === '1-card' ? '单一指引' : '时间之流'}): {record.cards?.map(c => c.name).join(' / ')}
                         </div>
                         <div className="text-right">
                           <button onClick={() => handleRestoreHistory(record)} className="text-[10px] uppercase text-slate-400 hover:text-slate-200 border border-slate-700/50 hover:border-slate-500 px-4 py-2 rounded transition-colors tracking-widest">
